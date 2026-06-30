@@ -1,6 +1,6 @@
 ---
 name: setup-matt-pocock-skills
-description: Configure this repo for the engineering skills — set up its issue tracker, triage label vocabulary, and domain doc layout. Run once before first use of the other engineering skills.
+description: Configure this repo for the engineering skills — set up its issue tracker (GitHub, GitLab, Linear, or local), triage vocabulary, and domain/ADR doc layout. Run once before first use of the other engineering skills.
 disable-model-invocation: true
 ---
 
@@ -8,7 +8,7 @@ disable-model-invocation: true
 
 Scaffold the per-repo configuration that the engineering skills assume:
 
-- **Issue tracker** — where issues live (GitHub by default; local markdown is also supported out of the box)
+- **Issue tracker** — where issues live (GitHub, GitLab, Linear, or local markdown)
 - **Triage labels** — the strings used for the five canonical triage roles
 - **Domain docs** — where `CONTEXT.md` and ADRs live, and the consumer rules for reading them
 
@@ -24,8 +24,10 @@ Look at the current repo to understand its starting state. Read whatever exists;
 - `AGENTS.md` and `CLAUDE.md` at the repo root — does either exist? Is there already an `## Agent skills` section in either?
 - `CONTEXT.md` and `CONTEXT-MAP.md` at the repo root
 - `docs/adr/` and any `src/*/docs/adr/` directories
+- `docs/decisions/` only as a pre-existing local convention to migrate from or cross-reference
 - `docs/agents/` — does this skill's prior output already exist?
-- `.scratch/` — sign that a local-markdown issue tracker convention is already in use
+- `.scratch/` or `backlog/` — sign that a local-markdown issue tracker convention is already in use
+- Global agent instructions (`~/AGENTS.md`, `~/.codex/AGENTS.md`, `~/.claude/CLAUDE.md`) if this is a personal portfolio repo — they may provide Linear routing and review-gate conventions. Matt Pocock's `CONTEXT.md` + `docs/adr/` domain-doc convention remains the default for repos configured by this skill.
 
 ### 2. Present findings and ask
 
@@ -37,18 +39,26 @@ Assume the user does not know what these terms mean. Each section starts with a 
 
 > Explainer: The "issue tracker" is where issues live for this repo. Skills like `to-issues`, `triage`, `to-prd`, and `qa` read from and write to it — they need to know whether to call `gh issue create`, write a markdown file under `.scratch/`, or follow some other workflow you describe. Pick the place you actually track work for this repo.
 
-Default posture: these skills were designed for GitHub. If a `git remote` points at GitHub, propose that. If a `git remote` points at GitLab (`gitlab.com` or a self-hosted host), propose GitLab. Otherwise (or if the user prefers), offer:
+Default posture: these skills were originally designed for GitHub, but the configured tracker must match where the repo actually tracks work. If the repo is under `/Volumes/home-ext/projects/` and the global instructions say private work lives in Linear, propose **Linear** even when the code remote is GitHub. If a non-portfolio repo's `git remote` points at GitHub, propose GitHub. If it points at GitLab (`gitlab.com` or a self-hosted host), propose GitLab. Otherwise (or if the user prefers), offer:
 
+- **Linear** — issues and PRDs live in Linear (uses the configured Linear MCP connector, e.g. `linear_theroomofrequirement`, with repo-specific team/project/state mapping)
 - **GitHub** — issues live in the repo's GitHub Issues (uses the `gh` CLI)
 - **GitLab** — issues live in the repo's GitLab Issues (uses the [`glab`](https://gitlab.com/gitlab-org/cli) CLI)
-- **Local markdown** — issues live as files under `.scratch/<feature>/` in this repo (good for solo projects or repos without a remote)
-- **Other** (Jira, Linear, etc.) — ask the user to describe the workflow in one paragraph; the skill will record it as freeform prose
+- **Local markdown** — issues live as files under `.scratch/<feature>/` or `backlog/` in this repo (good for solo projects or repos without a remote)
+- **Other** (Jira, Height, etc.) — ask the user to describe the workflow in one paragraph; the skill will record it as freeform prose
+
+For Linear, ask only for missing routing details:
+
+- Workspace connector (portfolio default: `mcp__linear_theroomofrequirement`)
+- Team (portfolio default: `THE`)
+- Project, initiative, or repo label if the repo uses one
+- Whether the team maps triage roles to Linear states, labels, or both
 
 If — and only if — the user picked **GitHub** or **GitLab**, ask one follow-up:
 
 > Explainer: Open-source repos often receive feature requests as pull requests, not just issues — a PR is an issue with attached code. If you turn this on, `/triage` pulls *external* PRs into the same queue and runs them through the same labels and states as issues (collaborators' in-flight PRs are left alone). Leave it off if PRs aren't a request surface for you.
 
-- **PRs as a request surface** — yes / no (default: no). Record the answer in `docs/agents/issue-tracker.md`. For local-markdown and other trackers, skip this question — there are no PRs.
+- **PRs as a request surface** — yes / no (default: no). Record the answer in `docs/agents/issue-tracker.md`. For Linear, local-markdown, and other trackers, skip this question unless their tracker template explicitly adds a PR/diff workflow.
 
 **Section B — Triage label vocabulary.**
 
@@ -62,16 +72,18 @@ The five canonical roles:
 - `ready-for-human` — needs human implementation
 - `wontfix` — will not be actioned
 
-Default: each role's string equals its name. Ask the user if they want to override any. If their issue tracker has no existing labels, the defaults are fine.
+Default: each role's string equals its name. Ask the user if they want to override any. If their issue tracker has no existing labels, the defaults are fine. If the user chose Linear, start from `triage-labels-linear.md` and verify whether each role maps to a Linear state, a label, or both.
 
 **Section C — Domain docs.**
 
-> Explainer: Some skills (`improve-codebase-architecture`, `diagnosing-bugs`, `tdd`) read a `CONTEXT.md` file to learn the project's domain language, and `docs/adr/` for past architectural decisions. They need to know whether the repo has one global context or multiple (e.g. a monorepo with separate frontend/backend contexts) so they look in the right place.
+> Explainer: Some skills (`improve-codebase-architecture`, `diagnosing-bugs`, `tdd`) read a `CONTEXT.md` file to learn the project's domain language, and ADRs for past architectural decisions. They need to know whether the repo has one global context or multiple (e.g. a monorepo with separate frontend/backend contexts) so they look in the right place.
 
 Confirm the layout:
 
 - **Single-context** — one `CONTEXT.md` + `docs/adr/` at the repo root. Most repos are this.
 - **Multi-context** — `CONTEXT-MAP.md` at the root pointing to per-context `CONTEXT.md` files (typically a monorepo).
+
+Default ADR path: `docs/adr/`, matching Matt Pocock's domain-modeling skill. If a repo already has `docs/decisions/` from older local policy, record it as readable context and ask whether to migrate future ADRs to `docs/adr/` or keep the old path for that repo. Do not make `docs/decisions/` override Matt's convention by default.
 
 ### 3. Confirm and edit
 
@@ -114,10 +126,12 @@ The block:
 
 Then write the three docs files using the seed templates in this skill folder as a starting point:
 
+- [issue-tracker-linear.md](./issue-tracker-linear.md) — Linear issue tracker
 - [issue-tracker-github.md](./issue-tracker-github.md) — GitHub issue tracker
 - [issue-tracker-gitlab.md](./issue-tracker-gitlab.md) — GitLab issue tracker
 - [issue-tracker-local.md](./issue-tracker-local.md) — local-markdown issue tracker
 - [triage-labels.md](./triage-labels.md) — label mapping
+- [triage-labels-linear.md](./triage-labels-linear.md) — Linear state/label mapping
 - [domain.md](./domain.md) — domain doc consumer rules + layout
 
 For "other" issue trackers, write `docs/agents/issue-tracker.md` from scratch using the user's description.

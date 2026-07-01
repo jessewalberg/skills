@@ -152,7 +152,11 @@ jobs:
       - name: Open / update the sync PR
         if: steps.check.outputs.count != '0'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # This account blocks the Actions GITHUB_TOKEN from creating PRs, so use a
+          # user/fine-grained PAT (secret SYNC_PAT: Contents read + Pull requests write on
+          # this repo). Without it the branch is still pushed and we print instructions.
+          GH_TOKEN: ${{ secrets.SYNC_PAT }}
+          HAS_PAT: ${{ secrets.SYNC_PAT != '' }}
           BRANCH: ${{ steps.merge.outputs.branch }}
           DATE: ${{ steps.merge.outputs.date }}
           MERGE_STATUS: ${{ steps.merge.outputs.status }}
@@ -161,6 +165,11 @@ jobs:
           AI_REPORT: ${{ steps.ai.outputs.report }}
           CONFLICTS: ${{ steps.merge.outputs.conflicts }}
         run: |
+          if [ "$HAS_PAT" != "true" ]; then
+            echo "::warning title=No SYNC_PAT::Branch $BRANCH is pushed, but automated PR creation needs a SYNC_PAT secret (this account blocks the Actions token from opening PRs). Open the PR manually:"
+            echo "  gh pr create -R jessewalberg/skills --base main --head $BRANCH --title 'sync: merge upstream ($DATE)'"
+            exit 0
+          fi
           DRAFT=""
           HEADER="✅ Clean merge."
           if [ "$MERGE_STATUS" = "conflicts" ] || [ "$GUARD_OK" = "false" ]; then

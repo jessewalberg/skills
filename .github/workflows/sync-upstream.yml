@@ -1,0 +1,216 @@
+name: Sync upstream (mattpocock/skills)
+
+# Weekly: bring Matt Pocock's latest changes into this fork WITHOUT losing our
+# customizations. It never pushes to main directly — it opens a PR you review.
+#
+# Safety model (why your changes can't be silently overwritten):
+#   1. Merge direction is upstream -> our main, ON A BRANCH -> PR. `main` only
+#      changes when YOU merge the PR. git merge keeps both sides; where upstream
+#      edits the same lines you customized it CONFLICTS (never discards) and the
+#      PR is marked draft for manual resolution.
+#   2. A deterministic guard asserts our customizations still exist after merge.
+#   3. An AI check (Claude) reviews the merge and confirms customizations are
+#      intact (runs only if the ANTHROPIC_API_KEY secret is set).
+
+on:
+  schedule:
+    - cron: '0 9 * * 1'   # Mondays 09:00 UTC
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+env:
+  UPSTREAM: https://github.com/mattpocock/skills.git
+  CUSTOM_DIR: skills/engineering/setup-matt-pocock-skills
+  HAS_AI_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout fork (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: main
+
+      - name: Configure git identity
+        run: |
+          git config user.name "skills-upstream-sync"
+          git config user.email "skills-upstream-sync@users.noreply.github.com"
+
+      - name: Fetch upstream
+        run: |
+          git remote add upstream "$UPSTREAM" 2>/dev/null || git remote set-url upstream "$UPSTREAM"
+          git fetch --quiet upstream
+          git fetch --quiet origin
+
+      - name: Detect new upstream commits
+        id: check
+        run: |
+          COUNT=$(git rev-list --count origin/main..upstream/main)
+          echo "count=$COUNT" >> "$GITHUB_OUTPUT"
+          if [ "$COUNT" = "0" ]; then
+            echo "✅ Already up to date with upstream — nothing to do."
+          else
+            echo "⬇️  $COUNT new upstream commit(s) to sync."
+          fi
+
+      - name: Merge upstream onto a sync branch
+        if: steps.check.outputs.count != '0'
+        id: merge
+        run: |
+          DATE=$(date -u +%Y-%m-%d)
+          BRANCH="sync/upstream-$DATE"
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+          echo "date=$DATE" >> "$GITHUB_OUTPUT"
+          git checkout -B "$BRANCH" origin/main
+          set +e
+          git merge --no-edit upstream/main
+          set -e
+          CONFLICTS=$(git diff --name-only --diff-filter=U || true)
+          if [ -n "$CONFLICTS" ]; then
+            echo "status=conflicts" >> "$GITHUB_OUTPUT"
+            {
+              echo "conflicts<<EOF"
+              echo "$CONFLICTS"
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+            # Commit the conflicted state (with markers) so the branch is pushable;
+            # you resolve it in the PR. This never lands on main automatically.
+            git add -A
+            git commit --no-edit -m "sync: merge upstream mattpocock/skills ($DATE) [CONFLICTS — needs resolution]"
+          else
+            echo "status=clean" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Guard — verify our customizations survived the merge
+        if: steps.check.outputs.count != '0'
+        id: guard
+        run: |
+          FAIL=""
+          [ -f "$CUSTOM_DIR/issue-tracker-linear.md" ] || FAIL="$FAIL issue-tracker-linear.md-MISSING"
+          [ -f "$CUSTOM_DIR/triage-labels-linear.md" ] || FAIL="$FAIL triage-labels-linear.md-MISSING"
+          grep -q 'mcp__linear-theroomofrequirement' "$CUSTOM_DIR/issue-tracker-linear.md" 2>/dev/null \
+            || FAIL="$FAIL hyphenated-connector-MISSING"
+          if grep -rqE 'mcp__linear_[a-z]' "$CUSTOM_DIR" 2>/dev/null; then
+            FAIL="$FAIL underscore-connector-REGRESSION"
+          fi
+          if [ -n "$FAIL" ]; then
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "detail=$FAIL" >> "$GITHUB_OUTPUT"
+            echo "::warning title=Customization guard failed::$FAIL"
+          else
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+            echo "✅ Customization guard passed — Linear files + hyphenated connector intact."
+          fi
+
+      - name: Push sync branch
+        if: steps.check.outputs.count != '0'
+        run: git push --force-with-lease -u origin "${{ steps.merge.outputs.branch }}"
+
+      - name: AI check (Claude) — confirm customizations intact + summarize upstream
+        if: steps.check.outputs.count != '0' && env.HAS_AI_KEY == 'true'
+        id: ai
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_MODEL: claude-sonnet-4-6
+        run: |
+          UPSTREAM_LOG=$(git log --oneline origin/main..upstream/main | head -60)
+          CUSTOM_DIFF=$(git diff origin/main...HEAD -- "$CUSTOM_DIR" | head -500)
+          # Build the payload entirely with jq --arg so diff content (with $, backticks,
+          # quotes, newlines) can never break shell quoting or a heredoc.
+          jq -n \
+            --arg model "$ANTHROPIC_MODEL" \
+            --arg dir "$CUSTOM_DIR" \
+            --arg log "$UPSTREAM_LOG" \
+            --arg diff "$CUSTOM_DIFF" \
+            '{model:$model, max_tokens:1200, messages:[{role:"user", content:(
+              "You are the AI reviewer for a weekly merge of upstream mattpocock/skills into our customized PUBLIC fork jessewalberg/skills. Our customizations live in " + $dir + " (Linear tracker: issue-tracker-linear.md, triage-labels-linear.md; plus edits to SKILL.md/domain.md/triage-labels.md) and MUST survive every sync.\n\nVerify our customizations were NOT clobbered by this merge, summarize the notable upstream changes, and flag anything that touches or risks our customizations.\n\nUpstream commits being merged:\n" + $log + "\n\nDiff of our customization area (origin/main...merge HEAD):\n" + $diff + "\n\nRespond in GitHub-flavored markdown, starting with a line exactly \"VERDICT: SAFE\" or \"VERDICT: NEEDS REVIEW\", then a 3-6 bullet summary of the upstream changes, then a \"Customizations\" section stating whether each is intact.")}]}' > /tmp/payload.json
+          HTTP=$(curl -sS -o /tmp/resp.json -w '%{http_code}' https://api.anthropic.com/v1/messages \
+            -H "x-api-key: $ANTHROPIC_API_KEY" \
+            -H "anthropic-version: 2023-06-01" \
+            -H "content-type: application/json" \
+            -d @/tmp/payload.json || echo "000")
+          if [ "$HTTP" = "200" ]; then
+            jq -r '.content[0].text' /tmp/resp.json > /tmp/ai_report.md
+          else
+            echo "_AI check could not run (HTTP $HTTP): $(jq -r '.error.message // "unknown error"' /tmp/resp.json 2>/dev/null)_" > /tmp/ai_report.md
+          fi
+          {
+            echo 'report<<AIEOF'
+            cat /tmp/ai_report.md
+            echo 'AIEOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Open / update the sync PR
+        if: steps.check.outputs.count != '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BRANCH: ${{ steps.merge.outputs.branch }}
+          DATE: ${{ steps.merge.outputs.date }}
+          MERGE_STATUS: ${{ steps.merge.outputs.status }}
+          GUARD_OK: ${{ steps.guard.outputs.ok }}
+          GUARD_DETAIL: ${{ steps.guard.outputs.detail }}
+          AI_REPORT: ${{ steps.ai.outputs.report }}
+          CONFLICTS: ${{ steps.merge.outputs.conflicts }}
+        run: |
+          DRAFT=""
+          HEADER="✅ Clean merge."
+          if [ "$MERGE_STATUS" = "conflicts" ] || [ "$GUARD_OK" = "false" ]; then
+            DRAFT="--draft"
+            HEADER="⚠️ Needs your attention before merging."
+          fi
+          {
+            echo "Automated weekly sync of **mattpocock/skills** into this fork. **Review before merging — this never touches \`main\` on its own.**"
+            echo
+            echo "**Status:** $HEADER"
+            echo
+            if [ "$MERGE_STATUS" = "conflicts" ]; then
+              echo "### ⚠️ Merge conflicts — resolve locally"
+              echo '```'
+              echo "$CONFLICTS"
+              echo '```'
+              echo "The branch has the conflicted state committed with markers. Check it out, resolve, and push:"
+              echo '```'
+              echo "git fetch origin && git checkout $BRANCH"
+              echo "# resolve conflicts, keeping our customizations, then:"
+              echo "git add -A && git commit && git push"
+              echo '```'
+              echo
+            fi
+            if [ "$GUARD_OK" = "false" ]; then
+              echo "### ⚠️ Customization guard FAILED"
+              echo "\`$GUARD_DETAIL\` — our Linear customizations may have been affected. Do not merge until fixed."
+              echo
+            else
+              echo "✅ Customization guard passed (Linear template files + hyphenated connector intact)."
+              echo
+            fi
+            if [ -n "$AI_REPORT" ]; then
+              echo "### 🤖 AI review"
+              echo "$AI_REPORT"
+              echo
+            else
+              echo "_AI review skipped — set the \`ANTHROPIC_API_KEY\` repo secret to enable it._"
+              echo
+            fi
+            echo "---"
+            echo "_Opened by the \`sync-upstream\` workflow. Merging is manual (reviewer ≠ implementer)._"
+          } > /tmp/pr_body.md
+
+          EXISTING=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number' 2>/dev/null || true)
+          if [ -n "$EXISTING" ]; then
+            gh pr edit "$EXISTING" --body-file /tmp/pr_body.md
+            echo "Updated PR #$EXISTING"
+          else
+            gh pr create --base main --head "$BRANCH" $DRAFT \
+              --title "sync: merge upstream mattpocock/skills ($DATE)" \
+              --body-file /tmp/pr_body.md
+          fi

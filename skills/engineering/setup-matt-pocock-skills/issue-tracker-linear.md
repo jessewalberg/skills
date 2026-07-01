@@ -4,7 +4,7 @@ Issues and PRDs for this repo live in Linear. GitHub may still hold code, PRs, a
 
 ## Configured routing
 
-- **Workspace connector**: `mcp__linear_theroomofrequirement`
+- **Workspace connector**: `mcp__linear-theroomofrequirement`
 - **Team**: `THE`
 - **Project / initiative / repo label**: set this during setup if the repo uses one
 - **Default state for agent-ready work**: `Todo` with label `auto`

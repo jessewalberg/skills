@@ -41,7 +41,7 @@ Assume the user does not know what these terms mean. Each section starts with a 
 
 Default posture: these skills were originally designed for GitHub, but the configured tracker must match where the repo actually tracks work. If the repo is under `/Volumes/home-ext/projects/` and the global instructions say private work lives in Linear, propose **Linear** even when the code remote is GitHub. If a non-portfolio repo's `git remote` points at GitHub, propose GitHub. If it points at GitLab (`gitlab.com` or a self-hosted host), propose GitLab. Otherwise (or if the user prefers), offer:
 
-- **Linear** — issues and PRDs live in Linear (uses the configured Linear MCP connector, e.g. `linear_theroomofrequirement`, with repo-specific team/project/state mapping)
+- **Linear** — issues and PRDs live in Linear (uses the configured Linear MCP connector, e.g. `mcp__linear-theroomofrequirement`, with repo-specific team/project/state mapping)
 - **GitHub** — issues live in the repo's GitHub Issues (uses the `gh` CLI)
 - **GitLab** — issues live in the repo's GitLab Issues (uses the [`glab`](https://gitlab.com/gitlab-org/cli) CLI)
 - **Local markdown** — issues live as files under `.scratch/<feature>/` or `backlog/` in this repo (good for solo projects or repos without a remote)
@@ -49,7 +49,7 @@ Default posture: these skills were originally designed for GitHub, but the confi
 
 For Linear, ask only for missing routing details:
 
-- Workspace connector (portfolio default: `mcp__linear_theroomofrequirement`)
+- Workspace connector (portfolio default: `mcp__linear-theroomofrequirement`)
 - Team (portfolio default: `THE`)
 - Project, initiative, or repo label if the repo uses one
 - Whether the team maps triage roles to Linear states, labels, or both
